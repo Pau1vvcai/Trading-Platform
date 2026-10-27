@@ -1,0 +1,8 @@
+**/target
+**/node_modules
+**/.next
+.git
+.idea
+.vscode
+*.log
+.env

@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: matching-api
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/matching}
+    username: ${DATABASE_USER:matching}
+    password: ${POSTGRES_PASSWORD:matching-local-only}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true

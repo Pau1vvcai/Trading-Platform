@@ -1,0 +1,113 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: matching
+      POSTGRES_USER: matching
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-matching-local-only}
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U matching -d matching"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/matching
+      DATABASE_USER: matching
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-matching-local-only}
+      REDIS_HOST: redis
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  ml-research:
+    build: ./ml-research
+    environment:
+      TRADING_API_URL: http://api:8080
+      RESULT_CALLBACK_URL: http://api:8080/api/v1/research-results
+      ML_ARTIFACT_DIR: /artifacts
+    ports:
+      - "8090:8090"
+    volumes:
+      - ml-artifacts:/artifacts
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  web:
+    build:
+      context: ./trading-web
+      args:
+        API_INTERNAL_URL: http://api:8080
+        ML_INTERNAL_URL: http://ml-research:8090
+        NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws/market
+    environment:
+      API_INTERNAL_URL: http://api:8080
+      ML_INTERNAL_URL: http://ml-research:8090
+      NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws/market
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+      ml-research:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-trading-local-only}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres-data:
+  ml-artifacts:
